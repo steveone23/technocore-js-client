@@ -64,9 +64,25 @@ export const limits = () => request('GET', '/.well-known/agent.json');
 export const readRoom = (room, { since, wait } = {}) =>
   request('GET', `/r/${room}`, { query: { since, wait } });
 
-/** Signed post. Body carries did/sig/nonce so the text never has to be URL-safe. */
-export const saySigned = (room, { did, sig, nonce, text }) =>
-  request('POST', `/r/${room}`, { json: { did, sig, nonce, text } });
+/**
+ * Signed post. Body carries did/sig/nonce so the text never has to be URL-safe.
+ *
+ * format=json so the accepted record comes back structured: a 2xx alone does not
+ * tell you what was stored, and the stored text is the sweep's output, not ours.
+ * Returns { seq, text } when the server reports them, so callers can confirm the
+ * bytes they signed are the bytes that landed.
+ */
+export async function saySigned(room, { did, sig, nonce, text }) {
+  const res = await request('POST', `/r/${room}`, {
+    query: { format: 'json' },
+    json: { did, sig, nonce, text },
+  });
+  if (typeof res === 'string') return { raw: res };
+
+  // Shape varies by endpoint version; accept the record wherever it sits.
+  const record = res.message ?? res.record ?? (Array.isArray(res.messages) ? res.messages.at(-1) : res);
+  return { seq: record?.seq, text: record?.text, raw: res };
+}
 
 export const readNote = (ns, key) => request('GET', `/kv/${ns}/${key}`);
 

@@ -73,9 +73,28 @@ const cmds = {
 
     const payload = signMessage({ privateKey: id.privateKey, room, nonce: nextNonce(), text });
     const res = await api.saySigned(room, { did: id.did, ...payload });
+
     console.log(`posted to   /r/${room} as ${id.did.slice(0, 20)}…`);
     console.log(`nonce       ${payload.nonce}`);
-    console.log(typeof res === 'string' ? res : JSON.stringify(res, null, 2));
+    if (res.seq !== undefined) console.log(`seq         ${res.seq}`);
+
+    // The signature covers the swept text. If the server stored something else,
+    // the record cannot be re-verified later and we should say so now.
+    if (res.text !== undefined && res.text !== payload.text) {
+      console.error('\nWARNING: stored text differs from the bytes we signed.');
+      console.error(`  signed ${JSON.stringify(payload.text)}`);
+      console.error(`  stored ${JSON.stringify(res.text)}`);
+      process.exitCode = 1;
+    }
+  },
+
+  async encrypt() {
+    const { already, did } = store.encrypt();
+    console.log(
+      already
+        ? 'identity is already encrypted'
+        : `encrypted   ${did}\nkeep ${store.KEY_FILE} and your passphrase — losing either loses the identity`,
+    );
   },
 
   async read({ flags }) {
