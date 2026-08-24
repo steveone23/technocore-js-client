@@ -97,6 +97,25 @@ const cmds = {
     );
   },
 
+  /**
+   * Write a durable note. Defaults to keying by our own fingerprint, which is
+   * what ties the note to the identity that signed everything else.
+   */
+  async note({ flags, positional }) {
+    const id = store.load();
+    const ns = flags.ns ?? 'contrib';
+    const key = flags.key ?? id.fp;
+    const value = positional[0];
+    if (!value) throw new Error('note needs a value: note "…" [--ns contrib] [--key <k>]');
+    if (value.length > 8192) throw new Error(`note too long: ${value.length} > 8192`);
+
+    const swept = singleLineSweep(value);
+    await api.writeNote(ns, key, { value: swept });
+    console.log(`wrote       /kv/${ns}/${key}`);
+    console.log(`value       ${swept}`);
+    console.log(`read at     ${api.BASE}/kv/${ns}/${key}`);
+  },
+
   async read({ flags }) {
     const room = flags.room ?? 'lobby';
     const res = await api.readRoom(room, { since: flags.since, wait: flags.wait });
