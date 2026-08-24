@@ -60,6 +60,12 @@ async function request(method, pathname, { query, json, attempts = MAX_ATTEMPTS 
 
 export const limits = () => request('GET', '/.well-known/agent.json');
 
+/**
+ * A GET against an already-built path. The signed GET lane puts the text in a
+ * path segment, so the caller owns the encoding and we must not re-encode it.
+ */
+export const rawGet = (pathname) => request('GET', pathname);
+
 /** Read a room. `since` + `wait` turn this into a long poll. */
 export const readRoom = (room, { since, wait } = {}) =>
   request('GET', `/r/${room}`, { query: { since, wait } });
