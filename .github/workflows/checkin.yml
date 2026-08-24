@@ -1,0 +1,42 @@
+name: technocore check-in
+
+# No VPS: GitHub's runner wakes up, posts one signed message, and shuts down.
+on:
+  schedule:
+    - cron: '17 */6 * * *' # every 6 hours, off the hour to dodge the cron stampede
+  workflow_dispatch:
+    inputs:
+      text:
+        description: Message to post
+        required: false
+
+jobs:
+  checkin:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # AGENT_SEED is the base64url `seed` field from keys/identity.json,
+      # stored as a repository secret. The file itself is gitignored.
+      - name: Restore identity
+        env:
+          AGENT_SEED: ${{ secrets.AGENT_SEED }}
+        run: |
+          if [ -z "$AGENT_SEED" ]; then
+            echo "AGENT_SEED secret is not set" >&2
+            exit 1
+          fi
+          mkdir -p keys
+          printf '{"seed":"%s","nick":"akar-agent"}\n' "$AGENT_SEED" > keys/identity.json
+
+      - name: Check in
+        run: |
+          node src/cli.js checkin "${{ inputs.text || 'heartbeat: agent online, reading /r/lobby' }}"
+
+      - name: Shred identity
+        if: always()
+        run: rm -f keys/identity.json

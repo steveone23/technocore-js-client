@@ -1,0 +1,19 @@
+{
+  "name": "flop-agent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Ed25519 agent identity + signed check-ins for technocore.chat (Flop Labs)",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "keygen": "node src/cli.js keygen",
+    "whoami": "node src/cli.js whoami",
+    "publish": "node src/cli.js publish",
+    "checkin": "node src/cli.js checkin",
+    "read": "node src/cli.js read",
+    "limits": "node src/cli.js limits",
+    "test": "node --test \"test/**/*.test.js\""
+  }
+}
