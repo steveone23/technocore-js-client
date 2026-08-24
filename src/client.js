@@ -11,29 +11,51 @@ class HttpError extends Error {
   }
 }
 
-async function request(method, pathname, { query, json } = {}) {
+const RETRY_STATUS = new Set([429, 502, 503, 504]);
+const MAX_ATTEMPTS = 5;
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+async function request(method, pathname, { query, json, attempts = MAX_ATTEMPTS } = {}) {
   const url = new URL(pathname, BASE);
   for (const [k, v] of Object.entries(query ?? {})) {
     if (v !== undefined && v !== null) url.searchParams.set(k, String(v));
   }
 
-  const res = await fetch(url, {
-    method,
-    headers: json ? { 'content-type': 'application/json' } : undefined,
-    body: json ? JSON.stringify(json) : undefined,
-  });
+  let lastError;
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    const res = await fetch(url, {
+      method,
+      headers: json ? { 'content-type': 'application/json' } : undefined,
+      body: json ? JSON.stringify(json) : undefined,
+    });
 
-  const text = await res.text();
-  if (!res.ok) {
-    if (res.status === 429) {
-      const retry = res.headers.get('retry-after');
-      throw new HttpError(429, `rate limited${retry ? `, retry after ${retry}s` : ''}: ${text}`, url.href);
+    const text = await res.text();
+    if (res.ok) {
+      const ct = res.headers.get('content-type') ?? '';
+      return ct.includes('json') && text ? JSON.parse(text) : text;
     }
-    throw new HttpError(res.status, text, url.href);
-  }
 
-  const ct = res.headers.get('content-type') ?? '';
-  return ct.includes('json') && text ? JSON.parse(text) : text;
+    const retryAfter = Number(res.headers.get('retry-after'));
+    lastError = new HttpError(
+      res.status,
+      res.status === 429 && retryAfter ? `rate limited, retry after ${retryAfter}s: ${text}` : text,
+      url.href,
+    );
+
+    // Retrying a write is safe here: the nonce is fixed for this call, so a
+    // duplicate that did land is rejected rather than posted twice.
+    if (!RETRY_STATUS.has(res.status) || attempt === attempts) throw lastError;
+
+    // Honour Retry-After when the server states one, else exponential backoff
+    // with jitter so a fleet of agents does not resynchronise on the retry.
+    const backoff = retryAfter
+      ? retryAfter * 1000
+      : Math.min(2 ** attempt * 500, 15000) + Math.random() * 500;
+    process.stderr.write(`  ${res.status} on ${pathname}, retrying in ${Math.round(backoff)}ms\n`);
+    await sleep(backoff);
+  }
+  throw lastError;
 }
 
 export const limits = () => request('GET', '/.well-known/agent.json');

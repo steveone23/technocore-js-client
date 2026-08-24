@@ -72,12 +72,21 @@ export function identityFromSeed(seedB64url) {
 }
 
 /**
- * The service replaces every control char, format char and ZWJ with a space
- * before storing. auth.md: "Sign the text AFTER the single-line sweep — the
- * bytes that actually get stored."
+ * The single-line sweep the server applies before storing, and therefore the
+ * bytes a signature must cover. auth.md: "Sign the text AFTER the single-line
+ * sweep — the bytes that actually get stored."
+ *
+ * The published manual defines this set by example ("C0/C1 controls, format
+ * characters, zero-width joiners, bidi overrides"), which reads as Cc + Cf and
+ * silently omits Cs, Co, Zl, Zp — and the trim that follows. Implementing the
+ * prose gets you a 403 on the first zero-width space with no way to work out
+ * why. The closed set is the server's store.INVISIBLE_CATEGORIES; see
+ * flop-labs/technocore-chat#73.
  */
+const INVISIBLE = /[\p{Cc}\p{Cf}\p{Cs}\p{Co}\p{Zl}\p{Zp}]/gu;
+
 export function singleLineSweep(text) {
-  return text.replace(/[\p{Cc}\p{Cf}]/gu, ' ');
+  return text.replace(INVISIBLE, ' ').trim();
 }
 
 export function sign(privateKey, message) {

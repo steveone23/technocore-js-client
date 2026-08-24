@@ -65,9 +65,27 @@ test('note signature covers ns|key|nonce|value', () => {
   assert.ok(verify(id.publicKey, `did|abc|7|${value}`, sig));
 });
 
-test('sweep strips control and format chars, and we sign the swept bytes', () => {
-  assert.equal(singleLineSweep('a\nb\tc'), 'a b c');
-  assert.equal(singleLineSweep('a‍b'), 'a b'); // ZWJ is Cf
+test('sweep covers all six invisible categories, then trims', () => {
+  // The manual only illustrates Cc and Cf. The enforced set is six categories
+  // plus a trim — flop-labs/technocore-chat#73. Each case is one category.
+  assert.equal(singleLineSweep('ab'), 'a b', 'Cc control');
+  assert.equal(singleLineSweep('a\nb\tc'), 'a b c', 'Cc newline/tab');
+  assert.equal(singleLineSweep('a​b'), 'a b', 'Cf zero-width space');
+  assert.equal(singleLineSweep('a‍b'), 'a b', 'Cf ZWJ');
+  assert.equal(singleLineSweep('a\u202Eb'), 'a b', 'Cf bidi override');
+  assert.equal(singleLineSweep('a\uD800b'), 'a b', 'Cs lone surrogate');
+  assert.equal(singleLineSweep('ab'), 'a b', 'Co private use');
+  assert.equal(singleLineSweep('a b'), 'a b', 'Zl line separator');
+  assert.equal(singleLineSweep('a b'), 'a b', 'Zp paragraph separator');
+
+  // Trim runs after the replacement, so edge controls collapse then vanish.
+  assert.equal(singleLineSweep('  ab  '), 'ab');
+  assert.equal(singleLineSweep('ab​'), 'ab');
+
+  // Zs is NOT swept — nbsp survives as a character, though trim eats it at the ends.
+  assert.equal(singleLineSweep('a b'), 'a b');
+
+  // Ordinary text, including non-ASCII, is untouched.
   assert.equal(singleLineSweep('héllo ✓'), 'héllo ✓');
 
   const id = generateIdentity();
