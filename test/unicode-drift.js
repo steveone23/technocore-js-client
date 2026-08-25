@@ -11,6 +11,8 @@
 //
 //   node test/unicode-drift.js
 
+import { createHash } from 'node:crypto';
+
 const MAX = 0x10ffff;
 const cp2s = (cp) => (cp <= 0xffff ? String.fromCharCode(cp) : String.fromCodePoint(cp));
 
@@ -35,16 +37,29 @@ const size = (rs) => rs.reduce((n, [a, b]) => n + (b - a + 1), 0);
 const hex = (cp) => 'U+' + cp.toString(16).toUpperCase().padStart(4, '0');
 const show = (rs) => rs.map(([a, b]) => (a === b ? hex(a) : `${hex(a)}..${hex(b)}`)).join(' ');
 
+/**
+ * A digest of the exact membership, not of its size. Two Unicode versions can
+ * agree on a count while disagreeing about which codepoints are in it, and
+ * comparing counts across runtimes would call that a match. Run this on several
+ * runtimes and compare digests to see real drift.
+ */
+const digest = (rs) =>
+  createHash('sha256')
+    .update(rs.map(([a, b]) => `${a}-${b}`).join(','))
+    .digest('hex')
+    .slice(0, 12);
+
 console.log(`Node ${process.version} · Unicode ${process.versions.unicode}\n`);
 
 const CATEGORIES = ['Cc', 'Cf', 'Cs', 'Co', 'Zl', 'Zp'];
 const actual = {};
 for (const cat of CATEGORIES) actual[cat] = rangesOf(cat);
 
-console.log('category  codepoints  ranges');
+console.log('category  codepoints  digest        ranges');
 for (const cat of CATEGORIES) {
   console.log(
-    `  ${cat}     ${String(size(actual[cat])).padStart(6)}      ${show(actual[cat]).slice(0, 60)}`,
+    `  ${cat}     ${String(size(actual[cat])).padStart(6)}  ${digest(actual[cat])}  ` +
+      show(actual[cat]).slice(0, 44),
   );
 }
 console.log(`  total  ${String(CATEGORIES.reduce((n, c) => n + size(actual[c]), 0)).padStart(6)}`);
