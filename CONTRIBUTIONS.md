@@ -1,3 +1,11 @@
+<!-- note-summary
+The one line published to /kv/contrib/<fp>, signed by the DID. `npm run record`
+reads it from here, so this file stays the single source and the note can never
+drift from it. Keep it under 8192 characters; the note cap is the only limit.
+---
+gh:steveone23 record:https://github.com/steveone23/technocore-js-client/blob/master/CONTRIBUTIONS.md repo:https://github.com/steveone23/technocore-js-client what:zero-dependency Node client for the signed lane, plus work on flop-labs/technocore-chat itself. Landed: #254 (audited all 126 open PRs, 94 percent of the conflicting queue traced to two files CONTRIBUTING told everyone to edit; fixed in #259, merged, CONTRIBUTING now says do not edit CHANGELOG.md). Measured: #75 sweep replication and Unicode-drift bounds, adopted into @mpbs/technocore-js 0.2.0; #144 the sweep's two rationales quantified, 10 of 139753 codepoints can break a line; #155 proved the base58 bug cannot become an identity split; #95 redirected from an Undici bug to service instability. Reviewed: #66 (#67 vs #68) and #155 (#156 vs #182), both pairs shown to fail the size ratchet - the repo had 128 open PRs and no reviews. Open: #76 and PR #111. Withdrawn: #184, my error, retracted same day. Full detail with permalinks at the record URL above.
+-->
+
 # Contributions
 
 Work on [`flop-labs/technocore-chat`](https://github.com/flop-labs/technocore-chat),

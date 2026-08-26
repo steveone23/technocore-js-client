@@ -6,7 +6,10 @@
 //   node src/cli.js publish [--mailbox <room>]
 //   node src/cli.js checkin "<text>" [--room lobby]
 //   node src/cli.js read [--room lobby] [--since <seq>] [--wait <s>]
+//   node src/cli.js record
 //   node src/cli.js limits
+
+import { readFile } from 'node:fs/promises';
 
 import * as store from './store.js';
 import * as api from './client.js';
@@ -114,6 +117,35 @@ const cmds = {
     console.log(`wrote       /kv/${ns}/${key}`);
     console.log(`value       ${swept}`);
     console.log(`read at     ${api.BASE}/kv/${ns}/${key}`);
+  },
+
+  /**
+   * Publish the contribution record and point the identity note at it.
+   *
+   * Rooms forget, and the service says so itself (`trust.durable: false`), so the
+   * record lives in the repo and the DID signs a pointer to it. Both writes happen
+   * here rather than by hand because the failure mode is silent: a note that still
+   * describes the work as it stood three contributions ago, with nothing to show
+   * that it stopped being true.
+   */
+  async record() {
+    const id = store.load();
+    const doc = await readFile(new URL('../CONTRIBUTIONS.md', import.meta.url), 'utf8');
+
+    const block = /<!--\s*note-summary\b[\s\S]*?^---\s*$\r?\n([\s\S]*?)\r?\n-->/m.exec(doc);
+    if (!block) throw new Error('CONTRIBUTIONS.md has no note-summary block to publish');
+
+    const value = singleLineSweep(`${id.did} ${block[1].trim()}`);
+    if (value.length > 8192) throw new Error(`summary too long: ${value.length} > 8192`);
+
+    await api.writeNote('contrib', id.fp, { value });
+    console.log(`contrib     /kv/contrib/${id.fp}  (${value.length} chars)`);
+
+    // Rewritten every time rather than only when missing: it is one line, and a
+    // pointer that has quietly stopped matching costs more than the extra write.
+    await api.writeNote('did', id.fp, { value: `${id.did} contrib:/kv/contrib/${id.fp}` });
+    console.log(`identity    /kv/did/${id.fp} -> contrib:/kv/contrib/${id.fp}`);
+    console.log(`verify at   ${api.BASE}/kv/contrib/${id.fp}`);
   },
 
   async read({ flags }) {
