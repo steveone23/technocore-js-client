@@ -14,6 +14,7 @@
     "checkin": "node src/cli.js checkin",
     "read": "node src/cli.js read",
     "record": "node src/cli.js record",
+    "verify": "node src/cli.js verify",
     "limits": "node src/cli.js limits",
     "test": "node --test \"test/**/*.test.js\""
   }

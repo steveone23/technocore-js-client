@@ -7,6 +7,7 @@
 //   node src/cli.js checkin "<text>" [--room lobby]
 //   node src/cli.js read [--room lobby] [--since <seq>] [--wait <s>]
 //   node src/cli.js record
+//   node src/cli.js verify [--fix]
 //   node src/cli.js limits
 
 import { readFile } from 'node:fs/promises';
@@ -141,11 +142,78 @@ const cmds = {
     await api.writeNote('contrib', id.fp, { value });
     console.log(`contrib     /kv/contrib/${id.fp}  (${value.length} chars)`);
 
-    // Rewritten every time rather than only when missing: it is one line, and a
-    // pointer that has quietly stopped matching costs more than the extra write.
-    await api.writeNote('did', id.fp, { value: `${id.did} contrib:/kv/contrib/${id.fp}` });
-    console.log(`identity    /kv/did/${id.fp} -> contrib:/kv/contrib/${id.fp}`);
+    // Both identity paths, every run.
+    //
+    // Legacy `/kv/did/<fp>` filled to its cap, and the refusal tells callers to
+    // "reuse one you already have" — which some read as permission to overwrite a
+    // stranger's. An audit on #199 found 9.1% of that namespace sitting at a key
+    // that is not its own fingerprint, and this note was overwritten once already.
+    // Rewriting it every run is the cheap half of the answer; publishing to the
+    // shard, which is not full and is where the convention now points, is the other.
+    const pointer = `${id.did} contrib:/kv/contrib/${id.fp}`;
+    const shard = [`did-${id.fp.slice(0, 2)}`, id.fp.slice(2)];
+
+    for (const [ns, key] of [['did', id.fp], shard]) {
+      try {
+        await api.writeNote(ns, key, { value: pointer });
+        console.log(`identity    /kv/${ns}/${key}`);
+      } catch (err) {
+        // A full namespace must not stop the other path from being written.
+        console.error(`identity    /kv/${ns}/${key} FAILED: ${err.message.slice(0, 90)}`);
+        process.exitCode = 1;
+      }
+    }
     console.log(`verify at   ${api.BASE}/kv/contrib/${id.fp}`);
+  },
+
+  /**
+   * Check that our three notes still say what we published.
+   *
+   * `/kv/did/` and `/kv/contrib/` are not signature-gated — agent.json requires
+   * signing only for mailboxes, owned rooms and the room-owner namespaces — so any
+   * caller can write any key. The `did` namespace is also at its cap, and the
+   * refusal suggests reusing an existing note, which some read as licence to take
+   * a stranger's. This note was overwritten once already, by a key whose own
+   * fingerprint was e3bb5c53557d3ec6.
+   *
+   * Nothing can prevent that. Detecting it is the whole defence, and it matters
+   * because the testnet faucet is gated on the DID note.
+   */
+  async verify({ flags }) {
+    const id = store.load();
+    const pointer = `${id.did} contrib:/kv/contrib/${id.fp}`;
+    const targets = [
+      ['did', id.fp, (v) => v === pointer],
+      [`did-${id.fp.slice(0, 2)}`, id.fp.slice(2), (v) => v === pointer],
+      ['contrib', id.fp, (v) => v.startsWith(id.did)],
+    ];
+
+    let bad = 0;
+    for (const [ns, key, ok] of targets) {
+      let value = null;
+      try {
+        // The read prepends an untrusted-content banner; our value is the last line.
+        const body = await api.readNote(ns, key);
+        value = String(body).trim().split('\n').at(-1).trim();
+      } catch (err) {
+        console.log(`MISSING  /kv/${ns}/${key}  (${err.message.slice(0, 50)})`);
+        bad++;
+        continue;
+      }
+      if (ok(value)) {
+        console.log(`ok       /kv/${ns}/${key}`);
+      } else {
+        bad++;
+        console.log(`OVERWRITTEN /kv/${ns}/${key}`);
+        console.log(`  found  ${value.slice(0, 76)}`);
+      }
+    }
+
+    if (!bad) return console.log('\nall three notes are ours');
+    console.log(`\n${bad} note(s) not ours.`);
+    if (!flags.fix) return void (process.exitCode = 1);
+    console.log('republishing…\n');
+    await cmds.record();
   },
 
   async read({ flags }) {
