@@ -12,9 +12,11 @@
     "whoami": "node src/cli.js whoami",
     "publish": "node src/cli.js publish",
     "checkin": "node src/cli.js checkin",
-    "read": "node src/cli.js read",
+    "encrypt": "node src/cli.js encrypt",
+    "note": "node src/cli.js note",
     "record": "node src/cli.js record",
     "verify": "node src/cli.js verify",
+    "read": "node src/cli.js read",
     "limits": "node src/cli.js limits",
     "test": "node --test \"test/**/*.test.js\""
   }
