@@ -94,6 +94,50 @@ export function sign(privateKey, message) {
   return b64url(crypto.sign(null, Buffer.from(message, 'utf8'), privateKey));
 }
 
+const B58_INDEX = new Map([...B58].map((c, i) => [c, i]));
+
+/**
+ * base58btc decode. Leading '1's encode leading zero bytes and are preserved here —
+ * the integer conversion drops them, which is the spec violation reported as
+ * flop-labs/technocore-chat#155. Unreachable for an ed25519 `did:key`, since the
+ * `0xed` multicodec prefix is never zero, but a decoder that is correct only for
+ * its current caller is a trap for the next one.
+ */
+function base58btcDecode(s) {
+  let n = 0n;
+  for (const ch of s) {
+    const d = B58_INDEX.get(ch);
+    if (d === undefined) throw new Error(`not base58btc: ${JSON.stringify(ch)}`);
+    n = n * 58n + BigInt(d);
+  }
+  const hex = n === 0n ? '' : n.toString(16).padStart(2 * Math.ceil(n.toString(2).length / 8), '0');
+  let zeros = 0;
+  for (const ch of s) {
+    if (ch !== '1') break;
+    zeros++;
+  }
+  return Buffer.concat([Buffer.alloc(zeros), Buffer.from(hex, 'hex')]);
+}
+
+/** The Ed25519 public key a `did:key:z6Mk…` names, or throw. */
+export function publicKeyFromDid(did) {
+  if (typeof did !== 'string' || !did.startsWith('did:key:z')) {
+    throw new Error(`not a did:key: ${did}`);
+  }
+  const decoded = base58btcDecode(did.slice('did:key:z'.length));
+  if (decoded.length !== 34 || decoded[0] !== 0xed || decoded[1] !== 0x01) {
+    throw new Error('only ed25519-pub (z6Mk…) did:key is supported');
+  }
+  // SPKI header for Ed25519, then the raw 32-byte key.
+  const spki = Buffer.concat([Buffer.from('302a300506032b6570032100', 'hex'), decoded.subarray(2)]);
+  return crypto.createPublicKey({ key: spki, format: 'der', type: 'spki' });
+}
+
+/** Verify a room record's signature against the DID that claims to have written it. */
+export function verifySigned(did, sigB64url, message) {
+  return verify(publicKeyFromDid(did), message, sigB64url);
+}
+
 export function verify(publicKey, message, sigB64url) {
   return crypto.verify(
     null,

@@ -67,8 +67,8 @@ export const limits = () => request('GET', '/.well-known/agent.json');
 export const rawGet = (pathname) => request('GET', pathname);
 
 /** Read a room. `since` + `wait` turn this into a long poll. */
-export const readRoom = (room, { since, wait } = {}) =>
-  request('GET', `/r/${room}`, { query: { since, wait } });
+export const readRoom = (room, { since, wait, limit, format } = {}) =>
+  request('GET', `/r/${room}`, { query: { since, wait, limit, format } });
 
 /**
  * Signed post. Body carries did/sig/nonce so the text never has to be URL-safe.

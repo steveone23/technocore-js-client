@@ -26,7 +26,7 @@ import {
 } from '@flop-labs/tclk';
 
 import * as api from './client.js';
-import { signMessage, nextNonce } from './did.js';
+import { signMessage, nextNonce, verifySigned as verifySignature } from './did.js';
 
 export { OFFER_ROOM, capabilityToken, dealRoom, generateHashLock };
 
@@ -89,19 +89,84 @@ export async function acceptOffer(id, offer) {
 }
 
 /**
+ * Offers we could actually take, newest first.
+ *
+ * Filters on the three things that decide whether an offer is workable rather than
+ * merely present: it is still open, it wants a side we can take, and it settles on
+ * a rail we accept. `from` is checked against the transport-verified sender because
+ * the spec requires them to match — a frame claiming someone else's DID is data,
+ * not a commitment.
+ *
+ * What it deliberately does not do is rank or auto-accept. Accepting is nearly free
+ * on a paper rail, which is exactly why a queue of accepts proves nothing; the
+ * judgement about whether work is real stays with a human.
+ */
+export function workableOffers(entries, { ourRails = ['paper'], role = 'payee', now = Date.now() } = {}) {
+  const wantedFrom = role === 'payee' ? 'payer' : 'payee';
+  const rails = new Set(ourRails);
+  const seen = new Set();
+  const out = [];
+
+  for (const e of entries) {
+    const f = e.frame;
+    if (f.type !== 'offer' || f.role !== wantedFrom) continue;
+    if (f.from !== e.from) continue; // frame `from` must equal the signed sender
+    if (typeof f.expiresMs === 'number' && f.expiresMs <= now) continue;
+    if (!Array.isArray(f.rails) || !f.rails.some((r) => rails.has(r))) continue;
+    if (seen.has(f.id)) continue; // one offer, many re-posts
+    seen.add(f.id);
+    out.push(e);
+  }
+  return out.sort((a, b) => b.seq - a.seq);
+}
+
+/**
+ * Parse a room's JSON view, keeping `nonce` a string.
+ *
+ * Nonces are up to 19 ASCII digits (the int64 ceiling the spec allows), and
+ * JSON.parse turns them into IEEE-754 doubles: 1788532459151210912 comes back as
+ * 1788532459151211000. The signature covers `<room>|<nonce>|<text>` with the
+ * original digits, so a rounded nonce verifies nothing. Measured on one 200-record
+ * page of tclk-offers, 10 records were altered this way.
+ *
+ * Quoting the field before parsing keeps the digits exact. The pattern is anchored
+ * to the key so a `nonce` appearing inside a frame's own text is untouched.
+ */
+function parseRoomJson(body) {
+  const raw = typeof body === 'string' ? body : JSON.stringify(body);
+  return JSON.parse(raw.replace(/("nonce"\s*:\s*)(\d+)/g, '$1"$2"'));
+}
+
+/**
  * Read frames from a room. Message bodies are anonymous input, so a malformed or
  * hostile line must not break the reader — `tryDecodeFrame` returns null instead
  * of throwing, and non-tclk chatter is skipped the same way.
  */
-export async function readFrames(room, { since, limit } = {}) {
-  const body = await api.readRoom(room, { since, limit });
+export async function readFrames(room, { since, limit, verify = true } = {}) {
+  // JSON, not the text view. The text view abbreviates the sender to `z6Mk…VRPC`
+  // to save tokens, so comparing a frame's `from` against it never matches and a
+  // sender check silently rejects everything. JSON carries the DID in full, plus
+  // the `nonce` and `sig` needed to re-verify the record without trusting us.
+  const body = await api.readRoom(room, { since, limit, format: 'json' });
+  const view = parseRoomJson(body);
+
   const out = [];
-  for (const line of String(body).split('\n')) {
-    if (!line.startsWith('[')) continue;
-    const m = /^\[(\d+)\]\s+(\S+)\s+<([^>]*)>\s(.*)$/.exec(line);
-    if (!m) continue;
-    const frame = tryDecodeFrame(m[4]);
-    if (frame) out.push({ seq: Number(m[1]), ts: m[2], from: m[3], frame });
+  for (const rec of view.messages ?? []) {
+    const frame = tryDecodeFrame(rec.text);
+    if (!frame) continue;
+
+    // The signature covers `<room>|<nonce>|<text>`. Checking it ourselves is the
+    // point of the signed lane: the server says who wrote a frame, and this is how
+    // a reader stops taking that on faith.
+    let signed = null;
+    if (verify && rec.sig && rec.nonce !== undefined && String(rec.from).startsWith('did:key:')) {
+      try {
+        signed = verifySignature(rec.from, rec.sig, `${room}|${rec.nonce}|${rec.text}`);
+      } catch {
+        signed = false;
+      }
+    }
+    out.push({ seq: rec.seq, ts: rec.ts, from: rec.from, sig: rec.sig, signed, frame });
   }
   return out;
 }
