@@ -19,5 +19,8 @@
     "read": "node src/cli.js read",
     "limits": "node src/cli.js limits",
     "test": "node --test \"test/**/*.test.js\""
+  },
+  "dependencies": {
+    "@flop-labs/tclk": "^0.1.0"
   }
 }

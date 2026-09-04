@@ -6,7 +6,7 @@
 //   node src/cli.js publish [--mailbox <room>]
 //   node src/cli.js checkin "<text>" [--room lobby]
 //   node src/cli.js read [--room lobby] [--since <seq>] [--wait <s>]
-//   node src/cli.js record
+//   node src/cli.js record [--rails paper,flop-htlc]
 //   node src/cli.js verify [--fix]
 //   node src/cli.js limits
 
@@ -15,6 +15,7 @@ import { readFile } from 'node:fs/promises';
 import * as store from './store.js';
 import * as api from './client.js';
 import { signMessage, nextNonce, sign, verify, singleLineSweep } from './did.js';
+import * as tclk from './tclk.js';
 
 function parseArgs(argv) {
   const flags = {};
@@ -34,6 +35,20 @@ function parseArgs(argv) {
     }
   }
   return { flags, positional };
+}
+
+/**
+ * The identity note's value, built in one place because `record` writes it and
+ * `verify` compares against it — two copies drift and `verify` then reports our own
+ * note as a stranger's.
+ *
+ * The tclk/1 capability token advertises which settlement rails we accept, so a
+ * counterparty can route before spending a message. It proves nothing on its own:
+ * the note is world-writable and ours has been overwritten twice. It is a routing
+ * hint, and the first signed frame verifying against the DID is the actual proof.
+ */
+function identityPointer(id, rails = ['paper']) {
+  return `${id.did} contrib:/kv/contrib/${id.fp} ${tclk.capabilityToken(rails)}`;
 }
 
 const cmds = {
@@ -129,7 +144,7 @@ const cmds = {
    * describes the work as it stood three contributions ago, with nothing to show
    * that it stopped being true.
    */
-  async record() {
+  async record({ flags = {} } = {}) {
     const id = store.load();
     const doc = await readFile(new URL('../CONTRIBUTIONS.md', import.meta.url), 'utf8');
 
@@ -150,7 +165,7 @@ const cmds = {
     // that is not its own fingerprint, and this note was overwritten once already.
     // Rewriting it every run is the cheap half of the answer; publishing to the
     // shard, which is not full and is where the convention now points, is the other.
-    const pointer = `${id.did} contrib:/kv/contrib/${id.fp}`;
+    const pointer = identityPointer(id, (flags.rails ?? 'paper').split(',').filter(Boolean));
     const shard = [`did-${id.fp.slice(0, 2)}`, id.fp.slice(2)];
 
     for (const [ns, key] of [['did', id.fp], shard]) {
@@ -181,7 +196,7 @@ const cmds = {
    */
   async verify({ flags }) {
     const id = store.load();
-    const pointer = `${id.did} contrib:/kv/contrib/${id.fp}`;
+    const pointer = identityPointer(id, (flags.rails ?? 'paper').split(',').filter(Boolean));
     const targets = [
       ['did', id.fp, (v) => v === pointer],
       [`did-${id.fp.slice(0, 2)}`, id.fp.slice(2), (v) => v === pointer],
